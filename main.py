@@ -1,64 +1,78 @@
-import requests
+"""Log a workout described in plain English to a Google Sheet.
+
+The description is sent to the Nutritionix natural-language exercise API, which
+returns the exercise name, duration and calories burned. Each exercise is then
+added as a row to a Google Sheet through the Sheety API.
+
+Credentials are read from environment variables (see .env.example).
+"""
 import datetime as dt
+import os
+import sys
 
-# Replace these with your actual credentials
-APP_ID = "Your APP ID"  # Nutritionix App ID
-API_KEY = "Your API KEY"  # Nutritionix API Key
+import requests
 
-# URL for the Nutritionix API
-NUTRITIONX_URL = "https://trackapi.nutritionix.com/v2/natural/exercise"
+NUTRITIONIX_URL = "https://trackapi.nutritionix.com/v2/natural/exercise"
 
-# Replace this with your actual Sheety URL
-SHEETY_URL = "Your SHEETY URL"
+APP_ID = os.environ.get("NUTRITIONIX_APP_ID")
+API_KEY = os.environ.get("NUTRITIONIX_API_KEY")
+SHEETY_URL = os.environ.get("SHEETY_URL")
+SHEETY_TOKEN = os.environ.get("SHEETY_TOKEN")
 
-# User input for the exercise performed
-User_input = input("Tell me which exercise you did:\n")
 
-# Headers for the Nutritionix API request
-headers = {
-    "x-app-id": APP_ID,  # App ID for Nutritionix API
-    "x-app-key": API_KEY  # API Key for Nutritionix API
-}
+def check_config():
+    missing = [
+        name
+        for name, value in {
+            "NUTRITIONIX_APP_ID": APP_ID,
+            "NUTRITIONIX_API_KEY": API_KEY,
+            "SHEETY_URL": SHEETY_URL,
+            "SHEETY_TOKEN": SHEETY_TOKEN,
+        }.items()
+        if not value
+    ]
+    if missing:
+        sys.exit(f"Missing environment variables: {', '.join(missing)}")
 
-# Parameters for the Nutritionix API request
-params = {
-    "query": query  # User-provided exercise query
-}
 
-# Make a POST request to Nutritionix API
-post = requests.post(url=NUTRITIONX_URL, json=params, headers=headers)
+def parse_exercises(query):
+    """Ask Nutritionix to turn a sentence like 'ran 5k and swam 20 minutes' into exercises."""
+    headers = {"x-app-id": APP_ID, "x-app-key": API_KEY}
+    response = requests.post(NUTRITIONIX_URL, json={"query": query}, headers=headers, timeout=15)
+    response.raise_for_status()
+    return response.json()["exercises"]
 
-# Print the JSON response from Nutritionix API for debugging
-print(post.json())
 
-# Extract exercise details from the response
-workout = (post.json())["exercises"][0]["name"]  # Name of the exercise
-duration = (post.json())["exercises"][0]["duration_min"]  # Duration in minutes
-calories = (post.json())["exercises"][0]["nf_calories"]  # Calories burned
-
-# Get current date and time
-now = dt.datetime.now()
-date = now.date().strftime("%d/%m/%Y")  # Format date as DD/MM/YYYY
-time = now.time().strftime("%H:%M:%S")  # Format time as HH:MM:SS
-
-# Prepare the body for the Sheety API request
-body = {
-    "workout": {
-        "date": date,  # Date of the workout
-        "time": time,  # Time of the workout
-        "exercise": workout,  # Name of the exercise
-        "duration": duration,  # Duration of the exercise
-        "calories": calories  # Calories burned
+def log_exercise(exercise, now):
+    """Add one exercise as a row in the Google Sheet."""
+    body = {
+        "workout": {
+            "date": now.strftime("%d/%m/%Y"),
+            "time": now.strftime("%H:%M:%S"),
+            "exercise": exercise["name"].title(),
+            "duration": exercise["duration_min"],
+            "calories": exercise["nf_calories"],
+        }
     }
-}
+    headers = {"Authorization": f"Bearer {SHEETY_TOKEN}"}
+    response = requests.post(SHEETY_URL, json=body, headers=headers, timeout=15)
+    response.raise_for_status()
 
-# Headers for the Sheety API request
-header = {
-    "Authorization": "Bearer YOUR_SHEETY_API_KEY"  # Authorization header for Sheety API
-}
 
-# Make a POST request to Sheety API to log the workout
-x = requests.post(url=SHEETY_URL, json=body, headers=header)
+def main():
+    check_config()
+    query = input("Tell me which exercises you did: ")
+    now = dt.datetime.now()
 
-# Print the response from Sheety API for debugging
-print(x.text)
+    exercises = parse_exercises(query)
+    if not exercises:
+        print("No exercises recognised. Try something like 'ran 3 miles'.")
+        return
+
+    for exercise in exercises:
+        log_exercise(exercise, now)
+        print(f"Logged {exercise['name']}: {exercise['duration_min']} min, {exercise['nf_calories']} kcal")
+
+
+if __name__ == "__main__":
+    main()

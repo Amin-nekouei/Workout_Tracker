@@ -42,7 +42,7 @@ flowchart LR
    python main.py
    ```
 
-## Example
+## Example run (values are illustrative)
 
 ```
 Tell me which exercises you did: ran 5k and cycled for 20 minutes
